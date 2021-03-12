@@ -57,6 +57,7 @@ interface Food {
   price: number;
   image_url: string;
   formattedPrice: string;
+  category: number;
   extras: Extra[];
 }
 
@@ -65,6 +66,9 @@ const FoodDetails: React.FC = () => {
   const [extras, setExtras] = useState<Extra[]>([]);
   const [isFavorite, setIsFavorite] = useState(false);
   const [foodQuantity, setFoodQuantity] = useState(1);
+  const [favortiteFood, setFavoriteFood] = useState<Omit<Food, 'extras'>>(
+    {} as Omit<Food, 'extras'>,
+  );
 
   const navigation = useNavigation();
   const route = useRoute();
@@ -73,38 +77,139 @@ const FoodDetails: React.FC = () => {
 
   useEffect(() => {
     async function loadFood(): Promise<void> {
-      // Load a specific food with extras based on routeParams id
+      const { data } = await api.get<Food>(`/foods/${routeParams.id}`);
+      const response = await api.get<Array<Omit<Food, 'extras'>>>('/favorites');
+
+      const findFavorite = response.data.find(item => item.id === data.id);
+
+      if (findFavorite) {
+        setFavoriteFood(findFavorite);
+      }
+
+      setIsFavorite(!!findFavorite);
+      setFood(data);
+      const extrasWithQuantity = data.extras.map(extra => {
+        return {
+          ...extra,
+          quantity: 0,
+        };
+      });
+      setExtras(extrasWithQuantity);
     }
 
     loadFood();
   }, [routeParams]);
 
   function handleIncrementExtra(id: number): void {
-    // Increment extra quantity
+    const extra = extras.find(item => item.id === id);
+
+    if (!extra) {
+      throw Error('Extra not found!');
+    }
+
+    extra.quantity += 1;
+
+    setExtras(state => {
+      const updatedExtras = state.map(item => {
+        if (item.id === extra.id) {
+          return extra;
+        }
+
+        return item;
+      });
+
+      return updatedExtras;
+    });
   }
 
   function handleDecrementExtra(id: number): void {
-    // Decrement extra quantity
+    const extra = extras.find(item => item.id === id);
+
+    if (!extra) {
+      throw Error('Extra not found!');
+    }
+
+    if (extra?.quantity === 0) {
+      return;
+    }
+
+    extra.quantity -= 1;
+
+    setExtras(state => {
+      const updatedExtras = state.map(item => {
+        if (item.id === extra.id) {
+          return extra;
+        }
+
+        return item;
+      });
+
+      return updatedExtras;
+    });
   }
 
   function handleIncrementFood(): void {
-    // Increment food quantity
+    setFoodQuantity(state => state + 1);
   }
 
   function handleDecrementFood(): void {
-    // Decrement food quantity
+    if (foodQuantity === 1) {
+      return;
+    }
+
+    setFoodQuantity(state => state - 1);
   }
 
   const toggleFavorite = useCallback(() => {
-    // Toggle if food is favorite or not
-  }, [isFavorite, food]);
+    if (isFavorite) {
+      api.delete(`/favorites/${favortiteFood.id}`).then(() => {
+        setIsFavorite(!isFavorite);
+      });
+    } else {
+      api.post('/favorites', food).then(() => {
+        setIsFavorite(!isFavorite);
+      });
+    }
+  }, [isFavorite, food, favortiteFood.id]);
 
   const cartTotal = useMemo(() => {
-    // Calculate cartTotal
+    let totalExtrasPrice = 0;
+
+    const foodPrice = food.price * foodQuantity;
+    const extrasPrice = extras.map(item => {
+      return item.value * item.quantity;
+    });
+
+    if (extrasPrice.length > 1) {
+      totalExtrasPrice = extrasPrice.reduce((prev, crr) => {
+        return prev + crr;
+      });
+    }
+
+    return foodPrice + totalExtrasPrice;
   }, [extras, food, foodQuantity]);
 
   async function handleFinishOrder(): Promise<void> {
-    // Finish the order and save on the API
+    const data = {
+      product_id: food.id,
+      name: food.name,
+      description: food.description,
+      price: cartTotal,
+      category: food.category,
+      thumbnail_url: food.image_url,
+      extras,
+    };
+
+    await api.post('/orders', data);
+
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: 'Dashboard',
+        },
+      ],
+    });
   }
 
   // Calculate the correct icon name
@@ -179,7 +284,9 @@ const FoodDetails: React.FC = () => {
         <TotalContainer>
           <Title>Total do pedido</Title>
           <PriceButtonContainer>
-            <TotalPrice testID="cart-total">{cartTotal}</TotalPrice>
+            <TotalPrice testID="cart-total">
+              {formatValue(cartTotal)}
+            </TotalPrice>
             <QuantityContainer>
               <Icon
                 size={15}
